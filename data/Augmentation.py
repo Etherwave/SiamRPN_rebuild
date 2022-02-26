@@ -39,7 +39,7 @@ def crop_hwc(image, bbox, out_sz, padding=(0, 0, 0)):
 
 
 class Augmentation:
-    def __init__(self, shift=4, scale=1, blur=False):
+    def __init__(self, shift=4/127, scale=1, blur=False):
         # default args
         self.shift = shift
         self.scale = scale
@@ -128,7 +128,8 @@ class Augmentation:
         crop_bbox_corner = center2corner(crop_bbox_center)
 
         # 随机平移要裁剪的区域
-        tx, ty = (self.random() * self.shift, self.random() * self.shift)
+        gt_square_size = calc_bounding_square_size(gt_center[2], gt_center[3])
+        tx, ty = (self.random() * self.shift*gt_square_size, self.random() * self.shift*gt_square_size)
         x1, y1, x2, y2 = crop_bbox_corner
         # 保证平移不出去(很重要，平移过大搜索框中就可能没有目标了，没法制作label)
         left_max_shift = x2-gt_x2

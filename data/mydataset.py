@@ -23,8 +23,8 @@ class MyDataSet(Dataset):
         self.x_size = 255
         self.z_size = 127
         self.score_map_size = 17
-        self.template_aug = Augmentation(shift=4, scale=0.05)
-        self.search_aug = Augmentation(shift=64, scale=0.18, blur=0.18)
+        self.template_aug = Augmentation(shift=4/127, scale=0.05)
+        self.search_aug = Augmentation(shift=64/127, scale=0.18, blur=0.18)
         self.croped_frame_paths = []
         self.max_video_frames = 0
         datasets = ["E:/dataset/VOT/VOT2019"]
