@@ -1,9 +1,8 @@
 import torch.nn as nn
 import torch.nn.functional as F
 import torch
-
-from loss.loss import calc_loss
-
+from model.Alexnet import AlexNet
+from loss.SiamRPNPP_Origin_cross_entropy_loss.loss import select_cross_entropy_loss, weight_l1_loss
 
 def xcorr_depthwise(x, kernel):
     """depthwise cross correlation
@@ -48,7 +47,7 @@ class DepthwiseXCorr(nn.Module):
 class DepthwiseRPN(nn.Module):
     def __init__(self, anchor_num=5, in_channels=256, out_channels=256):
         super(DepthwiseRPN, self).__init__()
-        self.cls = DepthwiseXCorr(in_channels, out_channels, 1 * anchor_num)
+        self.cls = DepthwiseXCorr(in_channels, out_channels, 2 * anchor_num)
         self.loc = DepthwiseXCorr(in_channels, out_channels, 4 * anchor_num)
 
     def forward(self, z_f, x_f):
@@ -57,41 +56,13 @@ class DepthwiseRPN(nn.Module):
         return cls, loc
 
 
-class AlexNetLegacy(nn.Module):
-
-    def __init__(self):
-        configs = [3, 96, 256, 384, 384, 256]
-        super(AlexNetLegacy, self).__init__()
-        self.features = nn.Sequential(
-            nn.Conv2d(configs[0], configs[1], kernel_size=11, stride=2),
-            nn.BatchNorm2d(configs[1]),
-            nn.MaxPool2d(kernel_size=3, stride=2),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(configs[1], configs[2], kernel_size=5),
-            nn.BatchNorm2d(configs[2]),
-            nn.MaxPool2d(kernel_size=3, stride=2),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(configs[2], configs[3], kernel_size=3),
-            nn.BatchNorm2d(configs[3]),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(configs[3], configs[4], kernel_size=3),
-            nn.BatchNorm2d(configs[4]),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(configs[4], configs[5], kernel_size=3),
-            nn.BatchNorm2d(configs[5]),
-        )
-        self.feature_size = configs[5]
-
-    def forward(self, x):
-        x = self.features(x)
-        return x
-
 
 class SiamRPN(nn.Module):
-    def __init__(self):
+    def __init__(self, device):
         super(SiamRPN, self).__init__()
+        self.device = device
         # build backbone
-        self.backbone = AlexNetLegacy()
+        self.backbone = AlexNet()
         # build rpn head
         self.rpn_head = DepthwiseRPN()
 
@@ -99,10 +70,16 @@ class SiamRPN(nn.Module):
         zf = self.backbone(z)
         self.zf = zf
 
+    def log_softmax(self, cls):
+        b, a2, h, w = cls.size()
+        cls = cls.view(b, 2, a2 // 2, h, w)
+        cls = cls.permute(0, 2, 3, 4, 1).contiguous()
+        cls = F.log_softmax(cls, dim=4)
+        return cls
+
     def track(self, x):
         xf = self.backbone(x)
         cls, loc = self.rpn_head(self.zf, xf)
-        cls = torch.sigmoid(cls)
 
         return {
                 'cls': cls,
@@ -112,23 +89,51 @@ class SiamRPN(nn.Module):
     def forward(self, data):
         """ only used in training
         """
-        template = data['template'].cuda()
-        search = data['search'].cuda()
-        label_cls = data['label_cls'].cuda()
-        label_loc = data['label_loc'].cuda()
-        label_loc_weight = data['label_loc_weight'].cuda()
+        template = data['template'].to(self.device)
+        search = data['search'].to(self.device)
+        label_cls = data['label_cls'].to(self.device)
+        label_loc = data['label_loc'].to(self.device)
+        label_loc_weight = data['label_loc_weight'].to(self.device)
 
         # get feature
         zf = self.backbone(template)
         xf = self.backbone(search)
+
+        # print(zf.shape)
+        # print(xf.shape)
+        # torch.Size([1, 256, 6, 6])
+        # torch.Size([1, 256, 22, 22])
+
         cls, loc = self.rpn_head(zf, xf)
-        cls = torch.sigmoid(cls)
+
+        # print(cls.shape)
+        # print(loc.shape)
+        # torch.Size([1, 5, 17, 17])
+        # torch.Size([1, 20, 17, 17])
+
+        # cls = torch.sigmoid(cls)
+        cls = self.log_softmax(cls)
 
         # get loss
-        cls_loss, loc_loss = calc_loss(cls, loc, label_cls, label_loc, label_loc_weight)
+        cls_loss = select_cross_entropy_loss(cls, label_cls, self.device)
+        loc_loss = weight_l1_loss(loc, label_loc, label_loc_weight)
+        # # get loss
+        # cls_loss, loc_loss = calc_loss(cls, loc, label_cls, label_loc, label_loc_weight)
 
         outputs = {}
         outputs['total_loss'] = 1.0 * cls_loss + 1.2 * loc_loss
         outputs['cls_loss'] = cls_loss
         outputs['loc_loss'] = loc_loss
         return outputs
+
+def calc_model_size(model):
+    parameter_number = sum([param.nelement() for param in model.parameters()])
+    mb_size = parameter_number*4/1024/1024
+    return mb_size
+
+
+if __name__ == '__main__':
+    device = torch.device("cpu")
+    model = SiamRPN(device)
+    # print(model)
+    print("Number of parameter: %.2fMB" % (calc_model_size(model)))

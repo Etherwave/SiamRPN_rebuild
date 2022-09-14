@@ -6,10 +6,11 @@ from model.SiamRPN import SiamRPN
 from tracker.mytracker import SiamRPNTracker
 from data.myvideo import Video
 from data.mysubdataset import SubDataSet
-from paint.paint_fuc import *
+from paint.paint_func import *
 from data.bbox_func import *
 torch.set_num_threads(1)
-snapshot_path = "./../save/video.pt"
+# snapshot_path = "./../save/video.pt"
+snapshot_path = "./../save/SiamRPN_epoch_12.pt"
 video_path = 'E:/dataset/VOT/VOT2019/glove'
 # dataset_path = ["E:/dataset/VOT/VOT2019"]
 dataset_path = ["E:/dataset/tc"]
@@ -55,7 +56,8 @@ def main():
     model = SiamRPN()
 
     # load model
-    model.load_state_dict(torch.load(snapshot_path, map_location=lambda storage, loc: storage.cpu()))
+
+    model.load_state_dict(torch.load(snapshot_path, map_location=device))
     model.eval().to(device)
 
     # build tracker
